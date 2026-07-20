@@ -92,8 +92,25 @@ async function refresh({ full = false } = {}) {
 
 // Baseline for weekly gains: the earliest snapshot inside the past 7 days.
 // Gains are then (live xp from get-group-data) minus that baseline.
+// Preferred source is the project's own database (/api/xp), which records
+// XP snapshots per player over time; when no database is configured the
+// endpoint returns 503 and we fall back to groupiron.men's skill history.
 async function loadXpBaselines(force = false) {
   if (!force && state.xpBaselines && Date.now() - state.xpFetchedAt < 60_000) return;
+
+  try {
+    const qs = new URLSearchParams({ group: state.group });
+    const res = await fetch(`/api/xp?${qs}`, { headers: { Authorization: state.token } });
+    if (res.ok) {
+      const rows = await res.json();
+      state.xpBaselines = new Map(rows.map((r) => [r.name, { time: r.since, data: r.skills }]));
+      state.xpFetchedAt = Date.now();
+      return;
+    }
+  } catch {
+    // Fall through to the groupiron.men source below.
+  }
+
   const data = await api('get-skill-data', { period: 'Week' });
   const cutoff = Date.now() - 7 * 86_400_000;
   const map = new Map();

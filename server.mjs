@@ -3,12 +3,30 @@
 // Run with: npm start  (or: node server.mjs)
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import gimHandler from './api/gim.js';
+import xpHandler from './api/xp.js';
+
+// Load .env.local / .env if present, e.g. the database credentials pulled
+// with `vercel env pull .env.local`. Already-set variables are not touched.
+for (const file of ['.env.local', '.env']) {
+  try {
+    for (const line of readFileSync(new URL(file, import.meta.url), 'utf8').split('\n')) {
+      const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+      if (match && !(match[1] in process.env)) {
+        process.env[match[1]] = match[2].replace(/^(["'])(.*)\1$/, '$2');
+      }
+    }
+  } catch {
+    // File not present — fine.
+  }
+}
 
 const API_ROUTES = {
   '/api/gim': gimHandler,
+  '/api/xp': xpHandler,
 };
 
 const PORT = process.env.PORT || 3000;
