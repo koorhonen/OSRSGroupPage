@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Group Ironman Tracker</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="https://static.runelite.net/cache/item/icon/12810.png">
+</head>
+<body>
+
+  <!-- Login -->
+  <div id="login-view" class="view">
+    <form id="login-form" class="login-card" autocomplete="off">
+      <h1>Group Ironman Tracker</h1>
+      <p class="muted">Enter your group name and access token to view your group's items.</p>
+      <label>
+        Group name
+        <input id="login-group" type="text" placeholder="e.g. Pelailijat" required>
+      </label>
+      <label>
+        Access token
+        <input id="login-token" type="password" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" required>
+      </label>
+      <button type="submit" id="login-btn">Connect</button>
+      <p id="login-error" class="error hidden"></p>
+    </form>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="app-view" class="view hidden">
+    <header class="topbar">
+      <div class="brand">
+        <h1 id="group-title"></h1>
+        <span id="sync-status" class="sync"><span class="dot"></span><span id="sync-text">connecting…</span></span>
+      </div>
+      <input id="global-search" type="search" placeholder="Search items across all players…">
+      <button id="logout-btn" class="ghost">Log out</button>
+    </header>
+
+    <nav id="member-tabs" class="tabs"></nav>
+
+    <main id="member-content"></main>
+
+    <main id="search-content" class="hidden"></main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

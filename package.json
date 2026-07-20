@@ -1,0 +1,9 @@
+{
+  "name": "gim-tracker",
+  "version": "1.0.0",
+  "description": "Group Ironman item tracker for groupiron.men",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  }
+}
