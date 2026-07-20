@@ -7,6 +7,10 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import gimHandler from './api/gim.js';
 
+const API_ROUTES = {
+  '/api/gim': gimHandler,
+};
+
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = join(fileURLToPath(new URL('.', import.meta.url)), 'public');
 
@@ -24,7 +28,8 @@ http
   .createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${PORT}`);
 
-    if (url.pathname === '/api/gim') {
+    const apiHandler = API_ROUTES[url.pathname];
+    if (apiHandler) {
       // Adapt the plain Node req/res to the Vercel handler interface.
       req.query = Object.fromEntries(url.searchParams);
       res.status = (code) => ((res.statusCode = code), res);
@@ -32,7 +37,7 @@ http
         res.setHeader('content-type', 'application/json');
         res.end(JSON.stringify(obj));
       };
-      return gimHandler(req, res);
+      return apiHandler(req, res);
     }
 
     const relPath = url.pathname === '/' ? 'index.html' : url.pathname.slice(1);

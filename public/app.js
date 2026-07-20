@@ -11,6 +11,17 @@ const EQUIP_SLOTS = [
   'legs', null, 'hands', 'feet', null, 'ring', 'ammo',
 ];
 
+// Skill order of the API's 24-value xp arrays: alphabetical + Sailing appended.
+// (Verified against the official OSRS hiscores.)
+const SKILLS = [
+  'Agility', 'Attack', 'Construction', 'Cooking', 'Crafting', 'Defence',
+  'Farming', 'Firemaking', 'Fishing', 'Fletching', 'Herblore', 'Hitpoints',
+  'Hunter', 'Magic', 'Mining', 'Prayer', 'Ranged', 'Runecraft', 'Slayer',
+  'Smithing', 'Strength', 'Thieving', 'Woodcutting', 'Sailing',
+];
+
+const XP_TAB = '@WEEKLY_XP';
+
 const state = {
   group: localStorage.getItem('gim.group') || '',
   token: localStorage.getItem('gim.token') || '',
@@ -22,6 +33,8 @@ const state = {
   itemNames: {},
   pollTimer: null,
   tickTimer: null,
+  xpBaselines: null,       // name -> earliest skill snapshot within the past 7 days
+  xpFetchedAt: 0,
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -75,6 +88,40 @@ async function refresh({ full = false } = {}) {
     state.online = false;
     renderSyncStatus();
   }
+}
+
+// Baseline for weekly gains: the earliest snapshot inside the past 7 days.
+// Gains are then (live xp from get-group-data) minus that baseline.
+async function loadXpBaselines(force = false) {
+  if (!force && state.xpBaselines && Date.now() - state.xpFetchedAt < 60_000) return;
+  const data = await api('get-skill-data', { period: 'Week' });
+  const cutoff = Date.now() - 7 * 86_400_000;
+  const map = new Map();
+  for (const m of data) {
+    const snaps = (m.skill_data || [])
+      .slice()
+      .sort((a, b) => new Date(a.time) - new Date(b.time));
+    const base = snaps.find((s) => new Date(s.time) >= cutoff) || snaps[snaps.length - 1];
+    if (base) map.set(m.name, base);
+  }
+  state.xpBaselines = map;
+  state.xpFetchedAt = Date.now();
+}
+
+// Weekly gains for one member: total + per-skill list, or null while
+// history hasn't been loaded / doesn't exist for them.
+function xpGainsFor(m) {
+  if (!m.skills || !state.xpBaselines?.has(m.name)) return null;
+  const base = state.xpBaselines.get(m.name);
+  const perSkill = SKILLS
+    .map((skill, i) => ({ skill, gain: Math.max(0, (m.skills[i] || 0) - (base.data[i] || 0)) }))
+    .filter((x) => x.gain > 0)
+    .sort((a, b) => b.gain - a.gain);
+  return {
+    total: perSkill.reduce((a, x) => a + x.gain, 0),
+    perSkill,
+    since: base.time,
+  };
 }
 
 function itemPairs(arr) {
@@ -157,9 +204,107 @@ function renderTabs() {
     });
     nav.appendChild(btn);
   }
+
+  const xpBtn = el('button');
+  xpBtn.appendChild(el('span', null, 'Weekly XP'));
+  xpBtn.appendChild(el('span', 'sub', 'past 7 days'));
+  if (state.activeTab === XP_TAB) xpBtn.classList.add('active');
+  xpBtn.addEventListener('click', () => {
+    state.activeTab = XP_TAB;
+    $('#global-search').value = '';
+    renderAll();
+  });
+  nav.appendChild(xpBtn);
+}
+
+function renderXp() {
+  const main = $('#member-content');
+  main.replaceChildren();
+  const panel = el('section', 'panel bank-panel');
+  panel.appendChild(el('h2', null, 'XP gained — past 7 days'));
+
+  if (!state.xpBaselines) {
+    panel.appendChild(el('p', 'empty-note', 'Loading XP history…'));
+    main.appendChild(panel);
+    loadXpBaselines()
+      .then(() => state.activeTab === XP_TAB && renderXp())
+      .catch(() => {
+        panel.replaceChildren(el('h2', null, 'XP gained — past 7 days'),
+          el('p', 'empty-note', 'Could not load XP history. It will retry on the next refresh.'));
+      });
+    return;
+  }
+
+  // Columns: members that have both live skills and a baseline snapshot.
+  const players = sortedMembers().filter(
+    (m) => m.skills && state.xpBaselines.has(m.name),
+  );
+
+  if (!players.length) {
+    panel.appendChild(el('p', 'empty-note', 'No XP history available yet.'));
+    main.appendChild(panel);
+    return;
+  }
+
+  const gains = players.map((m) => {
+    const base = state.xpBaselines.get(m.name);
+    return {
+      name: m.name,
+      since: base.time,
+      perSkill: SKILLS.map((_, i) => Math.max(0, (m.skills[i] || 0) - (base.data[i] || 0))),
+    };
+  });
+  gains.forEach((g) => (g.total = g.perSkill.reduce((a, b) => a + b, 0)));
+
+  const oldestBase = gains.reduce(
+    (min, g) => (new Date(g.since) < new Date(min) ? g.since : min), gains[0].since);
+  panel.appendChild(el('p', 'muted xp-note',
+    `Measured against each player's earliest tracked snapshot in the past 7 days (oldest: ${new Date(oldestBase).toLocaleString()}).`));
+
+  // Skills sorted by combined gain, untouched skills alphabetical at the bottom.
+  const rows = SKILLS.map((skill, i) => ({
+    skill,
+    sum: gains.reduce((a, g) => a + g.perSkill[i], 0),
+    i,
+  })).sort((a, b) => b.sum - a.sum || a.skill.localeCompare(b.skill));
+
+  const fmtGain = (n) => (n > 0 ? '+' + n.toLocaleString() : '—');
+
+  const wrap = el('div', 'table-wrap');
+  const table = el('table', 'xp-table');
+  const thead = el('thead');
+  const headRow = el('tr');
+  headRow.appendChild(el('th', 'skill-col', 'Skill'));
+  for (const g of gains) headRow.appendChild(el('th', null, displayName(g.name)));
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  const tbody = el('tbody');
+  const totalRow = el('tr', 'total');
+  totalRow.appendChild(el('td', 'skill-col', 'Total'));
+  for (const g of gains) totalRow.appendChild(el('td', g.total > 0 ? 'gain' : 'zero', fmtGain(g.total)));
+  tbody.appendChild(totalRow);
+
+  for (const { skill, i, sum } of rows) {
+    const tr = el('tr');
+    tr.appendChild(el('td', 'skill-col' + (sum === 0 ? ' zero' : ''), skill));
+    for (const g of gains) {
+      const v = g.perSkill[i];
+      tr.appendChild(el('td', v > 0 ? 'gain' : 'zero', fmtGain(v)));
+    }
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  panel.appendChild(wrap);
+  main.appendChild(panel);
+
+  // Keep the baseline reasonably fresh (throttled to once a minute).
+  loadXpBaselines().catch(() => {});
 }
 
 function renderMember() {
+  if (state.activeTab === XP_TAB) return renderXp();
   const main = $('#member-content');
   main.replaceChildren();
   const m = state.members.get(state.activeTab);
@@ -167,7 +312,7 @@ function renderMember() {
 
   if (!m.last_updated && !m.bank) {
     main.appendChild(el('p', 'empty-note',
-      `${displayName(m.name)} has no synced data yet. They need to install the Group Ironmen Tracker RuneLite plugin and log in.`));
+      `No data has been synced for ${displayName(m.name)} yet. Syncing starts once they install the Group Ironmen Tracker RuneLite plugin and log in.`));
     return;
   }
 
@@ -187,6 +332,39 @@ function renderMember() {
   main.appendChild(meta);
 
   const row = el('div', 'panel-row');
+
+  // Weekly XP for this player
+  if (m.skills) {
+    const panel = el('section', 'panel xp-panel');
+    panel.appendChild(el('h2', null, 'XP this week'));
+    const gains = xpGainsFor(m);
+    if (!gains) {
+      panel.appendChild(el('p', 'empty-note',
+        state.xpBaselines ? 'No XP history for this player yet.' : 'Loading XP history…'));
+      if (!state.xpBaselines) {
+        loadXpBaselines()
+          .then(() => state.activeTab === m.name && renderMember())
+          .catch(() => {});
+      }
+    } else if (!gains.perSkill.length) {
+      panel.appendChild(el('p', 'empty-note', 'No XP gained this week.'));
+    } else {
+      const totalLine = el('p', 'xp-total');
+      totalLine.appendChild(el('span', 'xp-total-num', '+' + gains.total.toLocaleString()));
+      totalLine.append(' XP gained');
+      panel.appendChild(totalLine);
+      const list = el('div', 'xp-list');
+      for (const { skill, gain } of gains.perSkill) {
+        const rowEl = el('div', 'xp-row');
+        rowEl.appendChild(el('span', null, skill));
+        rowEl.appendChild(el('span', 'gain', '+' + gain.toLocaleString()));
+        list.appendChild(rowEl);
+      }
+      panel.appendChild(list);
+      panel.appendChild(el('p', 'muted xp-since', `since ${new Date(gains.since).toLocaleString()}`));
+    }
+    row.appendChild(panel);
+  }
 
   // Equipment
   if (m.equipment) {
@@ -240,7 +418,7 @@ function renderMember() {
   panel.appendChild(h);
 
   if (!bankItems.length) {
-    panel.appendChild(el('p', 'empty-note', 'Nothing stored here yet.'));
+    panel.appendChild(el('p', 'empty-note', 'No items stored.'));
   } else {
     const tools = el('div', 'bank-tools');
     const input = el('input');
@@ -304,15 +482,15 @@ function renderSearch() {
     }
     searchMain.appendChild(group);
   }
-  if (!total) searchMain.appendChild(el('p', 'empty-note', `No items matching “${query}” anywhere in the group.`));
+  if (!total) searchMain.appendChild(el('p', 'empty-note', `No items matching “${query}” were found.`));
 }
 
 function renderSyncStatus() {
   const box = $('#sync-status');
   box.classList.toggle('offline', !state.online);
   $('#sync-text').textContent = state.online
-    ? `live · updated ${timeAgo(state.lastSyncAt)}`
-    : 'connection lost — retrying…';
+    ? `Live · updated ${timeAgo(state.lastSyncAt)}`
+    : 'Connection lost — retrying';
 }
 
 function renderAll() {
@@ -330,6 +508,7 @@ function showApp() {
   $('#group-title').textContent = state.group;
   state.pollTimer = setInterval(refresh, REFRESH_MS);
   state.tickTimer = setInterval(renderSyncStatus, 1000);
+  loadXpBaselines().then(renderAll).catch(() => {});
 }
 
 function logout(message) {
@@ -340,6 +519,8 @@ function logout(message) {
   state.members.clear();
   state.activeTab = null;
   state.nextFromTime = EPOCH;
+  state.xpBaselines = null;
+  state.xpFetchedAt = 0;
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
   const errEl = $('#login-error');
