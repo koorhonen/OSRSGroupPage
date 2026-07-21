@@ -13,10 +13,10 @@ Sign in with your group name and access token to get:
   icons, in-game style quantity badges and exact counts on hover
 - **Group-wide item search** — find which member holds an item, and whether it is in
   their bank, inventory or equipment
-- **Bank tabs** — organize each player's bank like in the game: create tabs with a
-  selectable icon inside the bank window and drag items onto them. The main "All"
-  tab shows whatever is not yet organized, and searching looks through every tab.
-  Tabs are shared by the whole group
+- **Bank tabs** — organize each player's bank like in the game: create tabs inside
+  the bank window, give each one any OSRS item as its icon (searchable), and drag
+  items onto them. The main "All" tab shows whatever is not yet organized, and
+  searching looks through every tab. Tabs are shared by the whole group
 - **Weekly XP tracking** — XP gained per skill, shown in each player's tab and as a
   group-wide comparison table
 - **Live updates** — the dashboard polls every 10 seconds and fetches only what

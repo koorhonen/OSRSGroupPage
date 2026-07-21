@@ -12,7 +12,7 @@
 import { readFile, writeFile } from 'node:fs/promises';
 
 const UPSTREAM = 'https://groupiron.men/api/group';
-const ICONS = ['star', 'sword', 'shield', 'flask', 'coin', 'book'];
+const DEFAULT_ICON = '995'; // OSRS item id (Coins) used as the icon fallback
 const MAX_TABS_PER_PLAYER = 10;
 const MAX_ITEMS = 200;
 const MAX_NAME_LENGTH = 30;
@@ -41,8 +41,10 @@ function cleanName(name) {
   return s.length ? s : null;
 }
 
+// The icon is an OSRS item id, stored as text. Falls back to Coins.
 function cleanIcon(icon) {
-  return ICONS.includes(icon) ? icon : 'star';
+  const id = parseInt(icon, 10);
+  return Number.isInteger(id) && id > 0 ? String(id) : DEFAULT_ICON;
 }
 
 function cleanItems(items) {
@@ -66,7 +68,7 @@ function getSql() {
         group_name text NOT NULL,
         player text NOT NULL,
         name text NOT NULL,
-        icon text NOT NULL DEFAULT 'star',
+        icon text NOT NULL DEFAULT '995',
         items jsonb NOT NULL DEFAULT '[]'::jsonb,
         created_at timestamptz NOT NULL DEFAULT now()
       )`;

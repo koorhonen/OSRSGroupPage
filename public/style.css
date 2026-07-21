@@ -296,13 +296,10 @@ button.ghost {
 /* ---------- Custom tabs ---------- */
 
 .tab-icon {
-  width: 15px;
-  height: 15px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  image-rendering: pixelated;
   flex: none;
 }
 
@@ -354,22 +351,63 @@ button.ghost {
 
 .ct-hint { font-size: 0.8rem; margin: -0.25rem 0 0.75rem; }
 
-.icon-picker { display: flex; gap: 0.4rem; }
-
-.icon-picker button {
-  background: var(--card);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  padding: 0.5rem 0.6rem;
-  display: inline-flex;
+/* Item-search icon picker */
+.icon-search {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-weight: 400;
 }
 
-.icon-picker button .tab-icon { width: 17px; height: 17px; }
+.icon-search-current {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
 
-.icon-picker button.selected {
-  background: var(--accent-soft);
+.icon-search-current .tab-icon { width: 22px; height: 22px; }
+.icon-search-name { font-weight: 600; }
+
+.icon-search-input {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.9rem;
+  max-width: 320px;
+}
+
+.icon-search-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 168px;
+  overflow-y: auto;
+  align-content: flex-start;
+}
+
+.icon-search-hint { margin: 0.2rem 0; font-size: 0.8rem; }
+
+.icon-search-results button {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  background: var(--slot);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-search-results button:hover { border-color: var(--border); filter: none; }
+.icon-search-results button .tab-icon { width: 28px; height: 28px; }
+
+.icon-search-results button.selected {
   border-color: var(--accent);
-  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .tab-form {
@@ -401,7 +439,8 @@ button.ghost {
 
 .ct-settings {
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 0.75rem;
   margin-top: 1.25rem;
   padding-top: 1rem;
@@ -409,9 +448,17 @@ button.ghost {
   font-size: 0.85rem;
 }
 
-.ct-settings .danger { color: var(--danger); border-color: var(--danger); margin-left: auto; }
+.ct-settings-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+}
 
-.panel h2 .tab-icon { align-self: center; margin-right: 0.35rem; }
+.ct-settings .danger { color: var(--danger); border-color: var(--danger); }
+
+.panel h2 .tab-icon { align-self: center; margin-right: 0.4rem; }
 
 /* ---------- Panels ---------- */
 

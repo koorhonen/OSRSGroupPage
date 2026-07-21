@@ -22,22 +22,23 @@ const SKILLS = [
 
 const XP_TAB = '@WEEKLY_XP';
 
-// Line icons (24x24 stroke paths) selectable for bank tabs.
-const TAB_ICONS = {
-  star: '<path d="M12 3l2.7 5.6 6.2.9-4.5 4.3 1.1 6.1L12 17l-5.5 2.9 1.1-6.1-4.5-4.3 6.2-.9z"/>',
-  sword: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/>',
-  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
-  flask: '<path d="M10 2v6L4.5 18.5A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.8-2.5L14 8V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/>',
-  coin: '<circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.3 18"/><path d="M7 6h1v4"/>',
-  book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
-};
+// A bank tab's icon is an OSRS item id; its icon image comes from the same
+// RuneLite cache used everywhere else. Coins is the default / fallback.
+const DEFAULT_TAB_ICON = 995;
 
-function tabIcon(name) {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('class', 'tab-icon');
-  svg.innerHTML = TAB_ICONS[name] || TAB_ICONS.star;
-  return svg;
+function tabIcon(iconId) {
+  const id = Number(iconId) > 0 ? Number(iconId) : DEFAULT_TAB_ICON;
+  const img = document.createElement('img');
+  img.className = 'tab-icon';
+  img.src = ICON_URL(id);
+  img.alt = '';
+  img.loading = 'lazy';
+  img.draggable = false;
+  // Legacy tabs stored a name like "star"; fall back if the icon 404s.
+  img.addEventListener('error', () => {
+    if (!img.src.endsWith(`/${DEFAULT_TAB_ICON}.png`)) img.src = ICON_URL(DEFAULT_TAB_ICON);
+  });
+  return img;
 }
 
 const state = {
@@ -104,9 +105,10 @@ async function refresh({ full = false } = {}) {
     state.nextFromTime = requestedAt.toISOString();
     state.lastSyncAt = new Date();
     state.online = true;
-    // Don't rebuild the view mid-drag or the drop target vanishes; the next
-    // poll (or the drop itself) renders the merged data.
-    if (state.dragging) renderSyncStatus();
+    // Don't rebuild the view while the user is mid-drag or filling in the
+    // new-tab form, or their in-progress input/target vanishes. The next poll
+    // (or the action itself) renders the merged data.
+    if (state.dragging || state.activeBankTab === '@new') renderSyncStatus();
     else renderAll();
   } catch (err) {
     if (err instanceof AuthError) return logout('Session rejected — check your group name and token.');
@@ -370,6 +372,7 @@ function renderTabs() {
   if (state.activeTab === XP_TAB) xpBtn.classList.add('active');
   xpBtn.addEventListener('click', () => {
     state.activeTab = XP_TAB;
+    state.activeBankTab = null;
     $('#global-search').value = '';
     renderAll();
   });
@@ -462,18 +465,85 @@ function renderXp() {
   loadXpBaselines().catch(() => {});
 }
 
-function iconPicker(selected, onPick) {
-  const row = el('div', 'icon-picker');
-  for (const name of Object.keys(TAB_ICONS)) {
-    const btn = el('button');
-    btn.type = 'button';
-    btn.title = name;
-    btn.appendChild(tabIcon(name));
-    if (name === selected) btn.classList.add('selected');
-    btn.addEventListener('click', () => onPick(name));
-    row.appendChild(btn);
+// Searchable item list for the icon picker, built once from the RuneLite names.
+function itemSearchList() {
+  if (!state._itemList) {
+    state._itemList = Object.entries(state.itemNames)
+      .map(([id, name]) => ({ id: Number(id), name, lower: name.toLowerCase() }));
   }
-  return row;
+  return state._itemList;
+}
+
+// Icon picker: search any OSRS item by name and click it to use it as the tab
+// icon. Calls onPick(itemId) with the chosen id. `selected` is the current id.
+function iconPicker(selected, onPick) {
+  const wrap = el('div', 'icon-search');
+  let current = Number(selected) > 0 ? Number(selected) : DEFAULT_TAB_ICON;
+
+  const currentRow = el('div', 'icon-search-current');
+  currentRow.appendChild(el('span', 'muted', 'Icon:'));
+  let currentIcon = tabIcon(current);
+  currentRow.appendChild(currentIcon);
+  const currentName = el('span', 'icon-search-name', itemName(current));
+  currentRow.appendChild(currentName);
+  wrap.appendChild(currentRow);
+
+  const input = el('input', 'icon-search-input');
+  input.type = 'search';
+  input.placeholder = 'Search for an item…';
+  wrap.appendChild(input);
+
+  const results = el('div', 'icon-search-results');
+  wrap.appendChild(results);
+
+  const choose = (id, name) => {
+    current = id;
+    const nextIcon = tabIcon(id);
+    currentIcon.replaceWith(nextIcon);
+    currentIcon = nextIcon;
+    currentName.textContent = name;
+    [...results.querySelectorAll('button')].forEach((b) =>
+      b.classList.toggle('selected', Number(b.dataset.id) === id));
+    onPick(id);
+  };
+
+  const renderResults = () => {
+    const q = input.value.trim().toLowerCase();
+    results.replaceChildren();
+    if (!itemSearchList().length) {
+      results.appendChild(el('p', 'muted icon-search-hint', 'Item list unavailable.'));
+      return;
+    }
+    if (q.length < 2) {
+      results.appendChild(el('p', 'muted icon-search-hint', 'Type at least 2 letters to find an item.'));
+      return;
+    }
+    const matches = [];
+    for (const it of itemSearchList()) {
+      if (it.lower.includes(q)) {
+        matches.push(it);
+        if (matches.length >= 80) break;
+      }
+    }
+    if (!matches.length) {
+      results.appendChild(el('p', 'muted icon-search-hint', 'No items found.'));
+      return;
+    }
+    for (const it of matches) {
+      const btn = el('button');
+      btn.type = 'button';
+      btn.title = it.name;
+      btn.dataset.id = it.id;
+      btn.appendChild(tabIcon(it.id));
+      if (it.id === current) btn.classList.add('selected');
+      btn.addEventListener('click', () => choose(it.id, it.name));
+      results.appendChild(btn);
+    }
+  };
+
+  input.addEventListener('input', renderResults);
+  renderResults();
+  return wrap;
 }
 
 function renderMember() {
@@ -656,7 +726,7 @@ function renderMember() {
   // Inline "new tab" form replaces the grid while creating.
   if (creating) {
     const form = el('form', 'tab-form');
-    let icon = 'star';
+    let icon = DEFAULT_TAB_ICON;
 
     const nameLabel = el('label', null, 'Name');
     const nameInput = el('input');
@@ -668,15 +738,7 @@ function renderMember() {
     form.appendChild(nameLabel);
 
     const iconLabel = el('label', null, 'Icon');
-    let picker;
-    const pickHandler = (picked) => {
-      icon = picked;
-      const next = iconPicker(icon, pickHandler);
-      picker.replaceWith(next);
-      picker = next;
-    };
-    picker = iconPicker(icon, pickHandler);
-    iconLabel.appendChild(picker);
+    iconLabel.appendChild(iconPicker(icon, (picked) => { icon = picked; }));
     form.appendChild(iconLabel);
 
     const actions = el('div', 'form-actions');
@@ -772,7 +834,7 @@ function renderMember() {
   // Icon and deletion controls for the selected custom tab.
   if (bankTab) {
     const settings = el('div', 'ct-settings');
-    settings.appendChild(el('span', 'muted', 'Icon:'));
+    settings.appendChild(el('span', 'ct-settings-title', 'Change icon'));
     settings.appendChild(iconPicker(bankTab.icon, (picked) =>
       updateBankTab(m.name, bankTab, { icon: picked })));
     const del = el('button', 'ghost danger', 'Delete tab');
