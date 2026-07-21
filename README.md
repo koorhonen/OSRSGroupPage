@@ -23,9 +23,10 @@ Sign in with your group name and access token to get:
   changed, so data stays current while members play
 - **Light and dark mode** — follows the system theme automatically
 
-Your access token is stored only in your browser. If you do not have one yet, install
-the **Group Ironmen Tracker** plugin from the RuneLite plugin hub and follow its setup —
-it assigns each group a name and an access token.
+Your access token is stored only in your browser. If you do not have one yet, create a
+group on [groupiron.men](https://groupiron.men) — it gives you the group name and access
+token, which you then also enter into the **Group Ironmen Tracker** RuneLite plugin so
+your group's data syncs.
 
 ## Credits
 
