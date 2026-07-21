@@ -22,6 +22,24 @@ const SKILLS = [
 
 const XP_TAB = '@WEEKLY_XP';
 
+// Line icons (24x24 stroke paths) selectable for bank tabs.
+const TAB_ICONS = {
+  star: '<path d="M12 3l2.7 5.6 6.2.9-4.5 4.3 1.1 6.1L12 17l-5.5 2.9 1.1-6.1-4.5-4.3 6.2-.9z"/>',
+  sword: '<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/>',
+  shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+  flask: '<path d="M10 2v6L4.5 18.5A2 2 0 0 0 6.3 21h11.4a2 2 0 0 0 1.8-2.5L14 8V2"/><path d="M8.5 2h7"/><path d="M7 16h10"/>',
+  coin: '<circle cx="8" cy="8" r="6"/><path d="M18.1 10.4A6 6 0 1 1 10.3 18"/><path d="M7 6h1v4"/>',
+  book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
+};
+
+function tabIcon(name) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('class', 'tab-icon');
+  svg.innerHTML = TAB_ICONS[name] || TAB_ICONS.star;
+  return svg;
+}
+
 const state = {
   group: localStorage.getItem('gim.group') || '',
   token: localStorage.getItem('gim.token') || '',
@@ -35,6 +53,10 @@ const state = {
   tickTimer: null,
   xpBaselines: null,       // name -> earliest skill snapshot within the past 7 days
   xpFetchedAt: 0,
+  bankFilter: '',          // bank filter text, kept across the 10s re-renders
+  bankTabs: {},            // player -> [{ id, name, icon, items }] from the API
+  activeBankTab: null,     // null = main "All" view, '@new' = create form, or a tab id
+  dragging: false,         // true during a drag: re-renders pause so targets survive
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -82,12 +104,115 @@ async function refresh({ full = false } = {}) {
     state.nextFromTime = requestedAt.toISOString();
     state.lastSyncAt = new Date();
     state.online = true;
-    renderAll();
+    // Don't rebuild the view mid-drag or the drop target vanishes; the next
+    // poll (or the drop itself) renders the merged data.
+    if (state.dragging) renderSyncStatus();
+    else renderAll();
   } catch (err) {
     if (err instanceof AuthError) return logout('Session rejected — check your group name and token.');
     state.online = false;
     renderSyncStatus();
   }
+}
+
+// ---------- Bank tabs ----------
+
+async function apiTabs(method, params = {}, body = null) {
+  const qs = new URLSearchParams({ group: state.group, ...params });
+  const res = await fetch(`/api/tabs?${qs}`, {
+    method,
+    headers: {
+      Authorization: state.token,
+      ...(body ? { 'content-type': 'application/json' } : {}),
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`Tabs API error ${res.status}`);
+  return res.json();
+}
+
+// Fetches a player's bank tabs once per visit to their tab; switching
+// players re-fetches so edits made by other group members show up.
+function loadBankTabs(player) {
+  if (player in state.bankTabs) return;
+  state.bankTabs[player] = [];
+  apiTabs('GET', { player })
+    .then((tabs) => {
+      state.bankTabs[player] = tabs;
+      renderAll();
+    })
+    .catch(() => {
+      // Non-fatal: the bank just shows the main view without tabs.
+    });
+}
+
+async function createBankTab(player, name, icon) {
+  const tab = await apiTabs('POST', { player }, { name, icon });
+  state.bankTabs[player].push(tab);
+  state.activeBankTab = tab.id;
+  renderAll();
+}
+
+// Applies the patch locally right away, then persists it; on failure the
+// player's tabs are re-fetched so the UI never drifts from what's stored.
+function updateBankTab(player, tab, patch) {
+  Object.assign(tab, patch);
+  renderAll();
+  apiTabs('PATCH', { id: tab.id }, patch).catch(() => {
+    delete state.bankTabs[player];
+    loadBankTabs(player);
+  });
+}
+
+function deleteBankTab(player, tab) {
+  state.bankTabs[player] = state.bankTabs[player].filter((t) => t.id !== tab.id);
+  state.activeBankTab = null;
+  renderAll();
+  apiTabs('DELETE', { id: tab.id }).catch(() => {
+    delete state.bankTabs[player];
+    loadBankTabs(player);
+  });
+}
+
+// Moves an item to a tab (or back to the main view when targetTab is null).
+// An item lives in at most one tab, so it is removed from any other first.
+function assignItemToTab(player, itemId, targetTab) {
+  if (!Number.isInteger(itemId) || itemId <= 0) return;
+  for (const tab of state.bankTabs[player] || []) {
+    if (tab !== targetTab && tab.items.includes(itemId)) {
+      updateBankTab(player, tab, { items: tab.items.filter((i) => i !== itemId) });
+    }
+  }
+  if (targetTab && !targetTab.items.includes(itemId)) {
+    updateBankTab(player, targetTab, { items: [...targetTab.items, itemId] });
+  }
+}
+
+// Reorders items inside a tab: places draggedId just before targetId.
+function reorderInTab(player, tab, draggedId, targetId) {
+  if (draggedId === targetId || !tab.items.includes(draggedId)) return;
+  const items = tab.items.filter((i) => i !== draggedId);
+  const idx = items.indexOf(targetId);
+  if (idx === -1) return;
+  items.splice(idx, 0, draggedId);
+  updateBankTab(player, tab, { items });
+}
+
+// Makes a bank item cell a drop target for reordering within its own tab.
+function attachItemReorder(cell, player, tab, itemId) {
+  cell.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    cell.classList.add('drop-target');
+  });
+  cell.addEventListener('dragleave', () => cell.classList.remove('drop-target'));
+  cell.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    cell.classList.remove('drop-target');
+    state.dragging = false;
+    reorderInTab(player, tab, parseInt(e.dataTransfer.getData('text/plain'), 10), itemId);
+  });
 }
 
 // Baseline for weekly gains: the earliest snapshot inside the past 7 days.
@@ -200,9 +325,23 @@ function itemCell(item, extraClass = '') {
   img.src = ICON_URL(item.id);
   img.alt = '';
   img.loading = 'lazy';
+  // The browser's built-in image dragging would hijack the gesture; the
+  // cell itself is the draggable unit.
+  img.draggable = false;
   cell.appendChild(img);
   if (item.qty > 1) cell.appendChild(el('span', 'qty', fmtQty(item.qty)));
   cell.title = `${itemName(item.id)} × ${item.qty.toLocaleString()}`;
+  // Items can be dragged onto a bank tab's button, or onto another item in
+  // the same tab to swap places.
+  cell.draggable = true;
+  cell.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/plain', String(item.id));
+    e.dataTransfer.effectAllowed = 'copyMove';
+    state.dragging = true;
+  });
+  cell.addEventListener('dragend', () => {
+    state.dragging = false;
+  });
   return cell;
 }
 
@@ -216,6 +355,9 @@ function renderTabs() {
     if (m.name === state.activeTab) btn.classList.add('active');
     btn.addEventListener('click', () => {
       state.activeTab = m.name;
+      state.bankFilter = '';
+      state.activeBankTab = null;
+      delete state.bankTabs[m.name]; // re-sync this player's tabs on each visit
       $('#global-search').value = '';
       renderAll();
     });
@@ -320,9 +462,26 @@ function renderXp() {
   loadXpBaselines().catch(() => {});
 }
 
+function iconPicker(selected, onPick) {
+  const row = el('div', 'icon-picker');
+  for (const name of Object.keys(TAB_ICONS)) {
+    const btn = el('button');
+    btn.type = 'button';
+    btn.title = name;
+    btn.appendChild(tabIcon(name));
+    if (name === selected) btn.classList.add('selected');
+    btn.addEventListener('click', () => onPick(name));
+    row.appendChild(btn);
+  }
+  return row;
+}
+
 function renderMember() {
   if (state.activeTab === XP_TAB) return renderXp();
   const main = $('#member-content');
+  // The whole view is rebuilt below; remember whether the user was typing in
+  // the bank filter so focus can be restored afterwards.
+  const bankFilterFocused = document.activeElement?.classList?.contains('bank-filter');
   main.replaceChildren();
   const m = state.members.get(state.activeTab);
   if (!m) return;
@@ -431,34 +590,209 @@ function renderMember() {
   const bankItems = itemPairs(m.bank);
   const panel = el('section', 'panel bank-panel');
   const h = el('h2', null, m.name === '@SHARED' ? 'Shared bank ' : 'Bank ');
-  h.appendChild(el('span', 'count', `${bankItems.length.toLocaleString()} items`));
+  h.appendChild(el('span', 'count', `${bankItems.length.toLocaleString()} item${bankItems.length === 1 ? '' : 's'}`));
   panel.appendChild(h);
 
   if (!bankItems.length) {
     panel.appendChild(el('p', 'empty-note', 'No items stored.'));
-  } else {
-    const tools = el('div', 'bank-tools');
-    const input = el('input');
-    input.type = 'search';
-    input.placeholder = 'Filter bank…';
-    tools.appendChild(input);
-    panel.appendChild(tools);
-
-    const grid = el('div', 'grid-bank');
-    const cells = bankItems.map((it) => {
-      const cell = itemCell(it);
-      grid.appendChild(cell);
-      return { cell, name: itemName(it.id).toLowerCase() };
-    });
-    input.addEventListener('input', () => {
-      const q = input.value.trim().toLowerCase();
-      cells.forEach(({ cell, name }) => {
-        cell.style.display = !q || name.includes(q) ? '' : 'none';
-      });
-    });
-    panel.appendChild(grid);
+    main.appendChild(panel);
+    return;
   }
+
+  loadBankTabs(m.name);
+  const tabs = state.bankTabs[m.name] || [];
+  const bankTab = tabs.find((t) => t.id === state.activeBankTab) || null;
+  const creating = state.activeBankTab === '@new';
+  const assigned = new Set(tabs.flatMap((t) => t.items));
+
+  // Tab strip: "All" (the main tab) + this player's custom tabs + "+".
+  // Every tab button is a drop target; dropping an item moves it there.
+  const attachDrop = (btn, targetTab) => {
+    btn.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      btn.classList.add('drop-hover');
+    });
+    btn.addEventListener('dragleave', () => btn.classList.remove('drop-hover'));
+    btn.addEventListener('drop', (e) => {
+      e.preventDefault();
+      btn.classList.remove('drop-hover');
+      state.dragging = false;
+      assignItemToTab(m.name, parseInt(e.dataTransfer.getData('text/plain'), 10), targetTab);
+    });
+  };
+
+  const strip = el('div', 'bank-tab-strip');
+  const mainBtn = el('button', 'bank-tab' + (!bankTab && !creating ? ' active' : ''), 'All');
+  mainBtn.addEventListener('click', () => {
+    state.activeBankTab = null;
+    renderMember();
+  });
+  attachDrop(mainBtn, null);
+  strip.appendChild(mainBtn);
+
+  for (const tab of tabs) {
+    const btn = el('button', 'bank-tab' + (tab === bankTab ? ' active' : ''));
+    btn.appendChild(tabIcon(tab.icon));
+    btn.appendChild(el('span', null, tab.name));
+    btn.addEventListener('click', () => {
+      state.activeBankTab = tab.id;
+      renderMember();
+    });
+    attachDrop(btn, tab);
+    strip.appendChild(btn);
+  }
+
+  if (tabs.length < 10) {
+    const addBtn = el('button', 'bank-tab add-tab' + (creating ? ' active' : ''), '+ Tab');
+    addBtn.addEventListener('click', () => {
+      state.activeBankTab = '@new';
+      renderMember();
+    });
+    strip.appendChild(addBtn);
+  }
+  panel.appendChild(strip);
+
+  // Inline "new tab" form replaces the grid while creating.
+  if (creating) {
+    const form = el('form', 'tab-form');
+    let icon = 'star';
+
+    const nameLabel = el('label', null, 'Name');
+    const nameInput = el('input');
+    nameInput.type = 'text';
+    nameInput.maxLength = 30;
+    nameInput.placeholder = 'e.g. Barrows gear';
+    nameInput.required = true;
+    nameLabel.appendChild(nameInput);
+    form.appendChild(nameLabel);
+
+    const iconLabel = el('label', null, 'Icon');
+    let picker;
+    const pickHandler = (picked) => {
+      icon = picked;
+      const next = iconPicker(icon, pickHandler);
+      picker.replaceWith(next);
+      picker = next;
+    };
+    picker = iconPicker(icon, pickHandler);
+    iconLabel.appendChild(picker);
+    form.appendChild(iconLabel);
+
+    const actions = el('div', 'form-actions');
+    const create = el('button', null, 'Create tab');
+    create.type = 'submit';
+    const cancel = el('button', 'ghost', 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => {
+      state.activeBankTab = null;
+      renderMember();
+    });
+    actions.appendChild(create);
+    actions.appendChild(cancel);
+    form.appendChild(actions);
+
+    const error = el('p', 'error hidden');
+    form.appendChild(error);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      create.disabled = true;
+      try {
+        await createBankTab(m.name, nameInput.value.trim(), icon);
+      } catch {
+        error.textContent = 'Could not create the tab. Try again in a moment.';
+        error.classList.remove('hidden');
+        create.disabled = false;
+      }
+    });
+
+    panel.appendChild(form);
+    main.appendChild(panel);
+    nameInput.focus();
+    return;
+  }
+
+  // Item grid. Contents depend on the active tab and the search box:
+  //  - a typed search looks through the whole bank, across every tab;
+  //  - a custom tab shows its own items in the order the user arranged them;
+  //  - the "All" tab shows whatever is not yet organized into a tab.
+  const grid = el('div', 'grid-bank');
+  const byId = new Map(bankItems.map((it) => [it.id, it.qty]));
+  const note = el('p', 'empty-note hidden');
+
+  const displayItems = () => {
+    const q = state.bankFilter.trim().toLowerCase();
+    if (q) return bankItems.filter((it) => itemName(it.id).toLowerCase().includes(q));
+    if (bankTab) {
+      return bankTab.items.filter((id) => byId.has(id)).map((id) => ({ id, qty: byId.get(id) }));
+    }
+    return bankItems.filter((it) => !assigned.has(it.id));
+  };
+
+  const reorderable = () => bankTab && !state.bankFilter.trim();
+
+  const renderGrid = () => {
+    grid.replaceChildren();
+    const items = displayItems();
+    for (const it of items) {
+      const cell = itemCell(it);
+      if (reorderable()) attachItemReorder(cell, m.name, bankTab, it.id);
+      grid.appendChild(cell);
+    }
+    const q = state.bankFilter.trim();
+    note.textContent = items.length ? '' : q
+      ? 'No items match the search.'
+      : bankTab
+        ? 'This tab is empty. Drag items here from the All tab onto its button in the strip above.'
+        : 'Everything is organized into tabs.';
+    note.classList.toggle('hidden', items.length > 0);
+  };
+  renderGrid();
+
+  const input = el('input', 'bank-filter');
+  input.type = 'search';
+  input.placeholder = 'Search bank…';
+  input.title = 'Searches the entire bank, including all tabs';
+  input.value = state.bankFilter;
+  input.addEventListener('input', () => {
+    state.bankFilter = input.value;
+    renderGrid();
+  });
+
+  const tools = el('div', 'bank-tools');
+  tools.appendChild(input);
+  panel.appendChild(tools);
+  if (reorderable() && displayItems().length) {
+    panel.appendChild(el('p', 'muted ct-hint', 'Drag items to reorder them within this tab.'));
+  }
+  panel.appendChild(grid);
+  panel.appendChild(note);
+
+  // Icon and deletion controls for the selected custom tab.
+  if (bankTab) {
+    const settings = el('div', 'ct-settings');
+    settings.appendChild(el('span', 'muted', 'Icon:'));
+    settings.appendChild(iconPicker(bankTab.icon, (picked) =>
+      updateBankTab(m.name, bankTab, { icon: picked })));
+    const del = el('button', 'ghost danger', 'Delete tab');
+    del.addEventListener('click', () => {
+      if (confirm(`Delete the tab "${bankTab.name}"? Its items return to the main tab.`)) {
+        deleteBankTab(m.name, bankTab);
+      }
+    });
+    settings.appendChild(del);
+    panel.appendChild(settings);
+  }
+
   main.appendChild(panel);
+
+  // Re-renders replace the input element; give focus back if the user was
+  // typing in it when this render happened.
+  if (bankFilterFocused) {
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
 }
 
 function renderSearch() {
@@ -538,6 +872,9 @@ function logout(message) {
   state.nextFromTime = EPOCH;
   state.xpBaselines = null;
   state.xpFetchedAt = 0;
+  state.bankFilter = '';
+  state.bankTabs = {};
+  state.activeBankTab = null;
   $('#app-view').classList.add('hidden');
   $('#login-view').classList.remove('hidden');
   const errEl = $('#login-error');
@@ -584,6 +921,15 @@ $('#login-form').addEventListener('submit', (e) => {
 $('#logout-btn').addEventListener('click', () => logout());
 
 $('#global-search').addEventListener('input', renderSearch);
+
+// Safety net: always clear the drag flag when any drag ends, even if the
+// source cell was removed from the DOM by a drop that re-rendered the view.
+document.addEventListener('dragend', () => {
+  if (state.dragging) {
+    state.dragging = false;
+    if (!state.activeTab?.startsWith?.('@')) renderMember();
+  }
+});
 
 (async function init() {
   await loadItemNames();

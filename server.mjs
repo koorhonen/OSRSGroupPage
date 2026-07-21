@@ -8,6 +8,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import gimHandler from './api/gim.js';
 import xpHandler from './api/xp.js';
+import tabsHandler from './api/tabs.js';
 
 // Load .env.local / .env if present, e.g. the database credentials pulled
 // with `vercel env pull .env.local`. Already-set variables are not touched.
@@ -27,6 +28,7 @@ for (const file of ['.env.local', '.env']) {
 const API_ROUTES = {
   '/api/gim': gimHandler,
   '/api/xp': xpHandler,
+  '/api/tabs': tabsHandler,
 };
 
 const PORT = process.env.PORT || 3000;

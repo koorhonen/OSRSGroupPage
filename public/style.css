@@ -186,6 +186,126 @@ button.ghost {
   color: var(--muted);
 }
 
+/* ---------- Custom tabs ---------- */
+
+.tab-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.bank-tab-strip {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+
+.bank-tab-strip .bank-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.4rem 0.8rem;
+}
+
+.bank-tab-strip .bank-tab:hover { color: var(--text); filter: none; }
+
+.bank-tab-strip .bank-tab.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.bank-tab-strip .bank-tab.drop-hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-style: dashed;
+}
+
+.bank-tab-strip .add-tab {
+  border-style: dashed;
+}
+
+.item[draggable="true"] { cursor: grab; }
+.item[draggable="true"]:active { cursor: grabbing; }
+
+.item.drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.ct-hint { font-size: 0.8rem; margin: -0.25rem 0 0.75rem; }
+
+.icon-picker { display: flex; gap: 0.4rem; }
+
+.icon-picker button {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.5rem 0.6rem;
+  display: inline-flex;
+}
+
+.icon-picker button .tab-icon { width: 17px; height: 17px; }
+
+.icon-picker button.selected {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.tab-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 400px;
+}
+
+.tab-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.tab-form input {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  font-weight: 400;
+}
+
+.form-actions { display: flex; gap: 0.6rem; }
+
+.ct-settings {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.ct-settings .danger { color: var(--danger); border-color: var(--danger); margin-left: auto; }
+
+.panel h2 .tab-icon { align-self: center; margin-right: 0.35rem; }
+
 /* ---------- Panels ---------- */
 
 main { padding: 1.25rem 1.5rem 3rem; }
